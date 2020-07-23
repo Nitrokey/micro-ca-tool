@@ -608,6 +608,7 @@ function do_main_sc() {
 		"store-crt" "Store certificate on smartcard"
 		"read-crt" "Retrieve certificate from smartcard"
 		"cryptostick-reset-REALLY" "Reset Cryptostick + Nitrokey Pro/Start to defaults"
+    "pro-server" "Generate CSR and sign it for server"
 		"" "Back")
 	showmenu -t "SMARTCARD MENU" -p "SC" -n sc "${options[@]}"
 }
@@ -686,6 +687,46 @@ function do_sc_store-crt() {
 		return
 	fi
 	call "$cfg_app_pkcs15_init" --delete-objects cert --store-certificate "$certfile" --id $tmp_key_id --auth-id $tmp_auth_id --verify-pin
+}
+
+function do_sc_pro-server() {
+  msg "Create key and CSR for server"
+	local key_spec="rsa/2048"
+	need_resource pkcs15-init
+	readinput -d $key_spec "Key Specification"; key_spec="$REPLY"
+	
+  tmp_auth_id="03"
+  tmp_key_id="01"
+
+	msg_warning "IF SET, THIS WILL OVERRIDE A PREVIOUS KEY WITH ID $tmp_key_id."
+	if ! readinput_yesno -d n "Please confirm operation"; then
+		return
+	fi
+
+	OPENSC_DEBUG=${OPENSC_DEBUG:-2} call time "${cfg_app_pkcs15_init}" \
+		--delete-objects privkey,pubkey,cert \
+		--generate-key "$key_spec" --id "$tmp_key_id" --auth-id "$tmp_auth_id" --verify-pin
+
+  
+  msg "Making CSR"
+
+	local outfn="server.csr"
+  local subj="/CN=Server" key_id="01:01"
+
+	need_resources openssl engine_pkcs11 opensc_pkcs11
+	readinput -d "$subj" "Subject"; subj="$REPLY"
+	readinput -d "$outfn" "CSR Filename"; outfn="$REPLY"
+	#readinput -d "$key_id" "Private Key (<Auth-ID>:<Key-ID>)"; key_id="$REPLY"
+	
+	( openssl_engine ;
+	echo "req -new -engine pkcs11 -key \"$key_id\" -keyform engine -out \"$outfn\" -subj \"$subj\"" ) | call "${cfg_app_openssl}"
+
+# do_ca_sign
+#function do_ca_sign-csr() {
+#}
+
+  msg "Sign it with CA and import"
+  true;
 }
 
 function do_sc_read-crt() {
